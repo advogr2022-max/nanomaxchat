@@ -246,7 +246,7 @@ class MaxHttpServer(private val ctx: Context, port: Int) : NanoHTTPD("127.0.0.1"
     private fun apiChats(): Response {
         if (!AppState.isAuthenticated) return jsonResponse(401, mapOf("ok" to false, "error" to "Не авторизован"))
         val rawChats = AppState.chatsCache.toList()
-        // Нормализуем чаты: добавляем name fallback для DIALOG без названия
+        val meId = AppState.currentUserId
         val chats = rawChats.map { chat ->
             val map = chat.toMutableMap()
             if (map["title"] !is String || (map["title"] as? String).orEmpty().isEmpty()) {
@@ -254,14 +254,13 @@ class MaxHttpServer(private val ctx: Context, port: Int) : NanoHTTPD("127.0.0.1"
                 val id = map["id"] ?: map["chat_id"] ?: 0
                 if (type == "DIALOG") {
                     val participants = map["participants"] as? Map<*, *>
-                    if (participants != null && participants.isNotEmpty()) {
-                        val otherId = participants.keys.firstOrNull { it.toString() != "0" }
-                        map["title"] = "Диалог #${otherId ?: id}"
-                        map["name"] = "Диалог #${otherId ?: id}"
-                    } else {
-                        map["title"] = "Диалог #$id"
-                        map["name"] = "Диалог #$id"
+                    val otherId = participants?.keys?.firstOrNull { key ->
+                        val k = (key as? Number)?.toLong() ?: 0
+                        k != 0L && k != meId
                     }
+                    val otherName = if (otherId != null) "Пользователь $otherId" else "Диалог #$id"
+                    map["title"] = otherName
+                    map["name"] = otherName
                 } else {
                     map["title"] = "Чат #$id"
                     map["name"] = "Чат #$id"
@@ -281,26 +280,52 @@ class MaxHttpServer(private val ctx: Context, port: Int) : NanoHTTPD("127.0.0.1"
 
         val cached = AppState.messagesCache[chatId]
         if (cached != null && cached.isNotEmpty()) {
-            return jsonOk(mapOf("messages" to cached.toList()))
+            return jsonOk(mapOf("messages" to normalizeMessages(cached.toList(), chatId)))
         }
 
+        // Синхронный fetch — ждём ответа от MAX
         val protocol = AppState.protocol
-        if (protocol != null && AppState.isAuthenticated) {
-            serverScope.launch {
-                try {
-                    val msgs = protocol.fetchHistory(chatId)
-                    val list = AppState.messagesCache.computeIfAbsent(chatId) {
-                        java.util.concurrent.CopyOnWriteArrayList()
-                    }
-                    list.clear()
-                    list.addAll(msgs)
-                } catch (e: Exception) {
-                    AppState.connLogError("Ошибка загрузки истории: ${e.message}")
+        if (protocol != null) {
+            try {
+                val msgs = runBlocking { protocol.fetchHistory(chatId) }
+                val list = AppState.messagesCache.computeIfAbsent(chatId) {
+                    java.util.concurrent.CopyOnWriteArrayList()
                 }
+                list.clear()
+                list.addAll(msgs)
+                return jsonOk(mapOf("messages" to normalizeMessages(msgs, chatId)))
+            } catch (e: Exception) {
+                AppState.connLogError("Ошибка загрузки истории: ${e.message}")
             }
         }
 
-        return jsonOk(mapOf("messages" to (cached?.toList() ?: emptyList<Any>())))
+        return jsonOk(mapOf("messages" to emptyList<Any>()))
+    }
+
+    /** Добавляет outgoing и нормализует поля сообщений */
+    private fun normalizeMessages(msgs: List<Map<String, Any?>>, chatId: Long): List<Map<String, Any?>> {
+        val meId = AppState.currentUserId
+        return msgs.map { msg ->
+            val m = msg.toMutableMap()
+            val sender = (m["sender"] as? Number)?.toLong()
+                ?: (m["senderId"] as? Number)?.toLong()
+                ?: (m["from"] as? Number)?.toLong()
+                ?: 0
+            // Определяем outgoing: sender == текущий пользователь
+            val isOut = sender > 0 && sender == meId
+            m["outgoing"] = isOut
+            if (m["chatId"] == null && m["chat_id"] == null) m["chatId"] = chatId
+            if (m["chat_id"] != null) m["chatId"] = m["chat_id"]
+            // Нормализуем timestamp: если в секундах → в миллисекунды для JS
+            val ts = m["timestamp"] ?: m["time"] ?: m["createdAt"]
+            if (ts is Number && ts.toLong() < 10000000000L) {
+                m["timestamp"] = ts.toLong() * 1000
+            } else if (ts != null) {
+                m["timestamp"] = ts
+            }
+            if (m["timestamp"] == null) m["timestamp"] = m["time"]
+            m
+        }
     }
 
     // ─── API: Send message ─────────────────────────────────────────────

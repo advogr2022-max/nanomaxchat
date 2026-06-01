@@ -22,6 +22,7 @@ object AppState {
     @Volatile var currentPhone: String? = null
     @Volatile var smsSentAt: Long = 0
     @Volatile var protocol: MaxProtocol? = null
+    @Volatile var currentUserId: Long = 0
 
     // Thread-safe коллекции
     val chatsCache = CopyOnWriteArrayList<Map<String, Any?>>()

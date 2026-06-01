@@ -441,6 +441,27 @@ class MaxProtocol(private val client: MaxTcpClient) {
             }
         }
 
+        // Извлекаем ID текущего пользователя из профиля
+        val profile = loginData["profile"] as? Map<*, *>
+        if (profile != null) {
+            var userId: Long? = (profile["id"] as? Number)?.toLong()
+            if (userId == null || userId <= 0) {
+                userId = (profile["userId"] as? Number)?.toLong()
+            }
+            if (userId == null || userId <= 0) {
+                val userMap = profile["user"] as? Map<*, *>
+                userId = (userMap?.get("id") as? Number)?.toLong()
+            }
+            if (userId != null && userId > 0) {
+                AppState.currentUserId = userId
+                AppStateHelper.addLogEntry("ID пользователя: $userId")
+            } else {
+                AppStateHelper.addLogEntry("LOGIN: профиль без id, keys=[${profile.keys.joinToString(", ")}]")
+            }
+        } else {
+            AppStateHelper.addLogEntry("LOGIN ответ без profile")
+        }
+
         AppState.isAuthenticated = true
         AppState.connectionAlive = true
         startPing()
