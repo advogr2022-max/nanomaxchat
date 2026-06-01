@@ -231,13 +231,20 @@ class MaxHttpServer(private val ctx: Context, port: Int) : NanoHTTPD("127.0.0.1"
 
     private fun apiMe(): Response {
         if (!AppState.isAuthenticated) return jsonResponse(401, mapOf("ok" to false, "error" to "Не авторизован"))
-        // Простейший профиль — берём из первого чата
-        val phone = AppState.currentPhone ?: ""
+        val profile = AppState.userProfile
+        val name = (profile?.get("name") as? String)
+            ?: (profile?.get("firstName") as? String)
+            ?: "Пользователь"
+        val phone = AppState.currentPhone ?: (profile?.get("phone") as? String) ?: ""
+        val id = AppState.currentUserId
+        val avatar = (profile?.get("avatar") as? Map<*, *>)?.let { av ->
+            av["url"] as? String ?: av["large"] as? String ?: ""
+        } ?: ""
         return jsonOk(mapOf("user" to mapOf(
-            "id" to 0,
-            "name" to "Пользователь",
+            "id" to id,
+            "name" to name,
             "phone" to phone,
-            "avatar_url" to ""
+            "avatar_url" to avatar
         )))
     }
 
@@ -249,21 +256,58 @@ class MaxHttpServer(private val ctx: Context, port: Int) : NanoHTTPD("127.0.0.1"
         val meId = AppState.currentUserId
         val chats = rawChats.map { chat ->
             val map = chat.toMutableMap()
-            if (map["title"] !is String || (map["title"] as? String).orEmpty().isEmpty()) {
+            val title = map["title"] as? String
+            if (title.isNullOrEmpty()) {
                 val type = map["type"] as? String ?: ""
                 val id = map["id"] ?: map["chat_id"] ?: 0
                 if (type == "DIALOG") {
-                    val participants = map["participants"] as? Map<*, *>
-                    val otherId = participants?.keys?.firstOrNull { key ->
-                        val k = (key as? Number)?.toLong() ?: 0
-                        k != 0L && k != meId
+                    // participants — это List<Map>, не Map
+                    val participants = map["participants"] as? List<*>
+                    var otherName: String? = null
+                    if (participants != null) {
+                        for (p in participants) {
+                            if (p is Map<*, *>) {
+                                val uid = (p["id"] as? Number)?.toLong() ?: 0
+                                if (uid != meId && uid > 0) {
+                                    otherName = (p["name"] as? String)
+                                        ?: (p["firstName"] as? String)
+                                    @Suppress("UNCHECKED_CAST")
+                                    AppState.usersCache[uid] = p as Map<String, Any?>
+                                    break
+                                }
+                            }
+                        }
                     }
-                    val otherName = if (otherId != null) "Пользователь $otherId" else "Диалог #$id"
-                    map["title"] = otherName
-                    map["name"] = otherName
+                    // Если не нашли в participants — попробовать кэш
+                    if (otherName.isNullOrEmpty()) {
+                        val chatIdLong = (id as? Number)?.toLong() ?: id.toString().toLongOrNull() ?: 0
+                        val cachedUser = AppState.usersCache[chatIdLong]
+                        if (cachedUser != null) {
+                            otherName = (cachedUser["name"] as? String)
+                                ?: (cachedUser["firstName"] as? String)
+                        }
+                    }
+                    val displayName = if (!otherName.isNullOrEmpty()) otherName else "Диалог #$id"
+                    map["title"] = displayName
+                    map["name"] = displayName
                 } else {
                     map["title"] = "Чат #$id"
                     map["name"] = "Чат #$id"
+                }
+            }
+            // Добавляем phone для поиска
+            if (!map.containsKey("phone")) {
+                val participants = map["participants"] as? List<*>
+                if (participants != null) {
+                    for (p in participants) {
+                        if (p is Map<*, *>) {
+                            val uid = (p["id"] as? Number)?.toLong() ?: 0
+                            if (uid != meId && uid > 0) {
+                                map["phone"] = p["phone"] as? String ?: ""
+                                break
+                            }
+                        }
+                    }
                 }
             }
             map
@@ -293,6 +337,13 @@ class MaxHttpServer(private val ctx: Context, port: Int) : NanoHTTPD("127.0.0.1"
                 }
                 list.clear()
                 list.addAll(msgs)
+                // Логируем первое сообщение для отладки
+                if (msgs.isNotEmpty()) {
+                    val first = msgs.first()
+                    val keys = first.keys.joinToString(", ")
+                    val senderId = first["senderId"] ?: first["sender"] ?: first["from"]
+                    AppStateHelper.addLogEntry("Первое сообщение чата $chatId: senderId=$senderId keys=[$keys] meId=${AppState.currentUserId}")
+                }
                 return jsonOk(mapOf("messages" to normalizeMessages(msgs, chatId)))
             } catch (e: Exception) {
                 AppState.connLogError("Ошибка загрузки истории: ${e.message}")
@@ -307,16 +358,38 @@ class MaxHttpServer(private val ctx: Context, port: Int) : NanoHTTPD("127.0.0.1"
         val meId = AppState.currentUserId
         return msgs.map { msg ->
             val m = msg.toMutableMap()
-            val sender = (m["sender"] as? Number)?.toLong()
-                ?: (m["senderId"] as? Number)?.toLong()
+
+            // senderId (camelCase) — первым, как сериализует PyMax
+            val sender = (m["senderId"] as? Number)?.toLong()
+                ?: (m["sender"] as? Number)?.toLong()
                 ?: (m["from"] as? Number)?.toLong()
                 ?: 0
-            // Определяем outgoing: sender == текущий пользователь
-            val isOut = sender > 0 && sender == meId
+
+            // Определяем outgoing с fallback
+            val isOut = if (meId > 0) {
+                sender > 0 && sender == meId
+            } else {
+                (m["outgoing"] as? Boolean) == true
+                    || (m["fromMe"] as? Boolean) == true
+                    || (m["isOutgoing"] as? Boolean) == true
+            }
             m["outgoing"] = isOut
+            if (sender > 0) m["senderId"] = sender
+
+            // Имя отправителя из кэша
+            if (sender > 0) {
+                val cachedUser = AppState.usersCache[sender]
+                if (cachedUser != null) {
+                    m["senderName"] = (cachedUser["name"] as? String)
+                        ?: (cachedUser["firstName"] as? String)
+                        ?: "Пользователь"
+                }
+            }
+
             if (m["chatId"] == null && m["chat_id"] == null) m["chatId"] = chatId
             if (m["chat_id"] != null) m["chatId"] = m["chat_id"]
-            // Нормализуем timestamp: если в секундах → в миллисекунды для JS
+
+            // Нормализуем timestamp: секунды → миллисекунды для JS
             val ts = m["timestamp"] ?: m["time"] ?: m["createdAt"]
             if (ts is Number && ts.toLong() < 10000000000L) {
                 m["timestamp"] = ts.toLong() * 1000
@@ -324,6 +397,12 @@ class MaxHttpServer(private val ctx: Context, port: Int) : NanoHTTPD("127.0.0.1"
                 m["timestamp"] = ts
             }
             if (m["timestamp"] == null) m["timestamp"] = m["time"]
+
+            // Нормализуем текст
+            if (m["text"] == null) {
+                m["text"] = m["body"] ?: m["message"] ?: m["content"] ?: ""
+            }
+
             m
         }
     }

@@ -411,17 +411,43 @@ class MaxProtocol(private val client: MaxTcpClient) {
             AppState.chatsCache.clear()
             AppState.chatsCache.addAll(chatMaps)
             AppStateHelper.addLogEntry("Загружено ${chatMaps.size} чатов из LOGIN")
+            // Заполняем usersCache из participants каждого чата
+            for (chat in chatMaps) {
+                val participants = chat["participants"] as? List<*>
+                if (participants != null) {
+                    for (p in participants) {
+                        if (p is Map<*, *>) {
+                            val uid = (p["id"] as? Number)?.toLong()
+                            if (uid != null && uid > 0) {
+                                @Suppress("UNCHECKED_CAST")
+                                AppState.usersCache[uid] = p as Map<String, Any?>
+                            }
+                        }
+                    }
+                }
+            }
             // Логируем структуру первого чата для отладки
             if (chatMaps.isNotEmpty()) {
                 val first = chatMaps.first()
                 val keys = first.keys.joinToString(", ")
                 val type = first["type"]
                 val title = first["title"]
-                val id = first["id"]
-                AppStateHelper.addLogEntry("Первый чат: id=$id type=$type title=$title keys=[$keys]")
+                val participants = first["participants"]
+                val pType = when (participants) {
+                    is List<*> -> "List[${participants.size}]"
+                    is Map<*, *> -> "Map[${participants.size}]"
+                    null -> "null"
+                    else -> participants::class.simpleName
+                }
+                AppStateHelper.addLogEntry("Первый чат: id=${first["id"]} type=$type title=$title participants=$pType keys=[$keys]")
+                if (participants is List<*> && participants.isNotEmpty()) {
+                    val p0 = participants.first()
+                    if (p0 is Map<*, *>) {
+                        AppStateHelper.addLogEntry("Первый participant: id=${p0["id"]} name=${p0["name"]} firstName=${p0["firstName"]} keys=[${p0.keys.joinToString(",")}]")
+                    }
+                }
             }
             if (chatMaps.isEmpty()) {
-                // Если чатов нет в LOGIN — пробуем загрузить отдельно
                 AppStateHelper.addLogEntry("LOGIN ответ без чатов, пробуем fetchChats...")
                 val fetchedChats = fetchChats()
                 if (fetchedChats.isNotEmpty()) {
@@ -432,7 +458,6 @@ class MaxProtocol(private val client: MaxTcpClient) {
             }
         } else {
             AppStateHelper.addLogEntry("LOGIN ответ без поля chats")
-            // Пробуем загрузить чаты отдельно
             val fetchedChats = fetchChats()
             if (fetchedChats.isNotEmpty()) {
                 AppState.chatsCache.clear()
@@ -441,25 +466,38 @@ class MaxProtocol(private val client: MaxTcpClient) {
             }
         }
 
-        // Извлекаем ID текущего пользователя из профиля
+        // Извлекаем профиль и ID пользователя из LOGIN ответа
         val profile = loginData["profile"] as? Map<*, *>
         if (profile != null) {
-            var userId: Long? = (profile["id"] as? Number)?.toLong()
+            @Suppress("UNCHECKED_CAST")
+            AppState.userProfile = profile as Map<String, Any?>
+            AppStateHelper.addLogEntry("Профиль: keys=[${profile.keys.joinToString(",")}]")
+
+            var userId: Long? = (profile["userId"] as? Number)?.toLong()
             if (userId == null || userId <= 0) {
-                userId = (profile["userId"] as? Number)?.toLong()
+                userId = (profile["id"] as? Number)?.toLong()
             }
             if (userId == null || userId <= 0) {
                 val userMap = profile["user"] as? Map<*, *>
-                userId = (userMap?.get("id") as? Number)?.toLong()
+                userId = (userMap?.get("userId") as? Number)?.toLong()
+                    ?: (userMap?.get("id") as? Number)?.toLong()
+            }
+            if (userId == null || userId <= 0) {
+                userId = (loginData["userId"] as? Number)?.toLong()
             }
             if (userId != null && userId > 0) {
                 AppState.currentUserId = userId
                 AppStateHelper.addLogEntry("ID пользователя: $userId")
             } else {
-                AppStateHelper.addLogEntry("LOGIN: профиль без id, keys=[${profile.keys.joinToString(", ")}]")
+                AppStateHelper.addLogEntry("ПРЕДУПРЕЖДЕНИЕ: не удалось извлечь userId из профиля!")
             }
         } else {
             AppStateHelper.addLogEntry("LOGIN ответ без profile")
+            val uid = loginData["userId"] as? Number
+            if (uid != null) {
+                AppState.currentUserId = uid.toLong()
+                AppStateHelper.addLogEntry("userId из loginData: ${uid.toLong()}")
+            }
         }
 
         AppState.isAuthenticated = true

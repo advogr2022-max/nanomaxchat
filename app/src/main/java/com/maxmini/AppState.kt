@@ -28,6 +28,8 @@ object AppState {
     val chatsCache = CopyOnWriteArrayList<Map<String, Any?>>()
     val messagesCache = ConcurrentHashMap<Long, CopyOnWriteArrayList<Map<String, Any?>>>()
     val newMessages = CopyOnWriteArrayList<Map<String, Any?>>()
+    val usersCache = ConcurrentHashMap<Long, Map<String, Any?>>()
+    @Volatile var userProfile: Map<String, Any?>? = null
 
     // Пути
     lateinit var filesDir: File
@@ -104,6 +106,9 @@ object AppState {
         chatsCache.clear()
         messagesCache.clear()
         newMessages.clear()
+        usersCache.clear()
+        userProfile = null
+        currentUserId = 0
     }
 
     // Для передачи authCode между потоками

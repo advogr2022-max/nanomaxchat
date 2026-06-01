@@ -320,6 +320,14 @@
       border-bottom-left-radius: 4px;
     }
 
+    .msg-sender {
+      font-size: 12px;
+      font-weight: 600;
+      color: #60a5fa;
+      margin-bottom: 4px;
+    }
+    .msg.outgoing .msg-sender { display: none; }
+
     .msg-time {
       font-size: 10px;
       color: rgba(255,255,255,0.5);
@@ -1243,6 +1251,11 @@
       let content = '';
       const text = msg.text || msg.body || msg.message || msg.content || '';
       const attachment = msg.attachment || null;
+      const senderName = msg.senderName || '';
+      let senderHtml = '';
+      if (!isOut && senderName) {
+        senderHtml = `<div class="msg-sender">${escHtml(senderName)}</div>`;
+      }
 
       if (attachment) {
         const attType = attachment.type || '';
@@ -1289,7 +1302,7 @@
 
       return `
         <div class="msg ${cls}">
-          ${content}
+          ${senderHtml}${content}
           <div class="msg-time">${timeStr} ${statusIcon}</div>
         </div>
       `;
