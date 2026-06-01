@@ -316,17 +316,9 @@ loadChats();
                 AppState.isConnecting = false
                 AppState.connectionAlive = true
                 AppState.connLog("Авторизация успешна!")
-                // Загружаем чаты в кэш
-                serverScope.launch {
-                    try {
-                        val chats = protocol.fetchChats()
-                        AppState.chatsCache.clear()
-                        AppState.chatsCache.addAll(chats)
-                        AppState.connLog("Загружено ${chats.size} чатов")
-                    } catch (e: Exception) {
-                        AppState.connLogError("Ошибка загрузки чатов: ${e.message}")
-                    }
-                }
+                // A3: чаты загружаются внутри startAuth/loginWithToken
+                // Запускаем слушатель событий для входящих сообщений
+                protocol.startEventListener()
             }
             protocol.onConnectionLost = { cause ->
                 AppState.connectionAlive = false
@@ -334,16 +326,10 @@ loadChats();
             }
             protocol.onMessage = { msg ->
                 AppState.newMessages.add(msg)
-                val chatId = (msg["chat_id"] as? Number)?.toLong()
-                if (chatId != null) {
-                    val msgs = AppState.messagesCache.computeIfAbsent(chatId) {
-                        java.util.concurrent.CopyOnWriteArrayList()
-                    }
-                    msgs.add(msg)
-                }
             }
 
-            val ok = protocol.startAuth(phone)
+            // A10: пробуем войти по сохранённому токену
+            val ok = protocol.tryLoginByToken() || protocol.startAuth(phone)
             if (!ok) {
                 AppState.isConnecting = false
                 AppState.connectionAlive = false
@@ -498,7 +484,16 @@ loadChats();
                 is Number -> json.put(k, v)
                 is Boolean -> json.put(k, v)
                 is List<*> -> json.put(k, JSONArray(v))
-                is Map<*, *> -> json.put(k, JSONObject(v as Map<String, Any?>))
+                is Map<*, *> -> {
+                    try {
+                        json.put(k, JSONObject(v as Map<String?, Any?>))
+                    } catch (e: Exception) {
+                        // Если ключи не String — конвертируем
+                        val safe = LinkedHashMap<String, Any?>()
+                        for ((mk, mv) in v) safe[mk.toString()] = mv
+                        json.put(k, JSONObject(safe))
+                    }
+                }
                 else -> json.put(k, v.toString())
             }
         }

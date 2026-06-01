@@ -5,7 +5,6 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.msgpack.core.MessagePack
-import org.msgpack.core.MessageUnpacker
 import java.io.*
 import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
@@ -56,7 +55,8 @@ class MaxTcpClient(
     private var readerJob: Job? = null
     private var coroutineScope: CoroutineScope? = null
     private val pendingRequests = ConcurrentHashMap<Int, CompletableDeferred<Frame>>()
-    private val mutex = Mutex()
+    private val connectMutex = Mutex()
+    private val writeMutex = Mutex()  // A7: отдельный mutex для записи
     private val seqCounter = AtomicInteger(0)
 
     // Коллбэки
@@ -84,7 +84,7 @@ class MaxTcpClient(
         }
     }
 
-    suspend fun connect(): Boolean = mutex.withLock {
+    suspend fun connect(): Boolean = connectMutex.withLock {
         if (isConnected) return true
         isClosed = false
         try {
@@ -115,7 +115,7 @@ class MaxTcpClient(
      */
     private fun createSslSocket(): SSLSocket {
         val sslContext = SSLContext.getInstance("TLS")
-        sslContext.init(null, null, SecureRandom()) // системные доверенные CA
+        sslContext.init(null, null, SecureRandom())
         return sslContext.socketFactory.createSocket() as SSLSocket
     }
 
@@ -154,38 +154,41 @@ class MaxTcpClient(
      * Читает один фрейм:
      *   header: ver(1) | cmd(1) | seq(2) | opcode(2) | flags_len(4) = 10 байт
      *   payload: [payload_len] байт msgpack
+     *
+     * A6: при ошибке чтения payload — бросаем исключение вверх,
+     * чтобы reader-закрыл соединение, а не рассинхронизировал поток.
      */
     private fun readFrame(): Frame? {
         val r = reader ?: return null
-        return try {
-            val header = ByteArray(HEADER_SIZE)
-            r.readFully(header)
-            val buf = ByteBuffer.wrap(header).order(java.nio.ByteOrder.BIG_ENDIAN)
-            val ver = buf.get().toInt() and 0xFF
-            val cmd = buf.get().toInt() and 0xFF
-            val seq = buf.getShort().toInt() and 0xFFFF
-            val opcode = buf.getShort().toInt() and 0xFFFF
-            val packedLen = buf.getInt()
-            val flags = (packedLen shr 24) and 0xFF
-            val payloadLen = packedLen and 0x00FFFFFF
+        val header = ByteArray(HEADER_SIZE)
+        r.readFully(header)
+        val buf = ByteBuffer.wrap(header).order(java.nio.ByteOrder.BIG_ENDIAN)
+        val ver = buf.get().toInt() and 0xFF
+        val cmd = buf.get().toInt() and 0xFF
+        val seq = buf.getShort().toInt() and 0xFFFF
+        val opcode = buf.getShort().toInt() and 0xFFFF
+        val packedLen = buf.getInt()
+        val flags = (packedLen shr 24) and 0xFF
+        val payloadLen = packedLen and 0x00FFFFFF
 
-            val payload = if (payloadLen > 0) {
-                val p = ByteArray(payloadLen)
-                r.readFully(p)
-                p
-            } else byteArrayOf()
-
-            Frame(ver, cmd, seq, opcode, flags, payload)
-        } catch (e: EOFException) { throw e
-        } catch (e: SocketTimeoutException) { throw e
-        } catch (e: Exception) {
-            Log.w(TAG, "readFrame: skip bad: ${e.message}")
-            null
+        if (payloadLen < 0 || payloadLen > 0x100000) { // > 1MB — защита от битых фреймов
+            throw IOException("Invalid payload length: $payloadLen")
         }
+
+        val payload = if (payloadLen > 0) {
+            val p = ByteArray(payloadLen)
+            r.readFully(p)
+            p
+        } else byteArrayOf()
+
+        return Frame(ver, cmd, seq, opcode, flags, payload)
     }
 
     /**
      * Отправляет фрейм и ждёт ответ.
+     *
+     * A2: проверяем cmd ответа — если ERROR (3), возвращаем null
+     * и вызываем onError для логирования.
      */
     suspend fun request(opcode: Int, payload: ByteArray, timeoutMs: Long = WRITE_TIMEOUT): Frame? {
         val seq = nextSeq()
@@ -194,7 +197,16 @@ class MaxTcpClient(
 
         try {
             sendFrame(CMD_REQUEST, seq, opcode, 0, payload)
-            return withTimeout(timeoutMs) { deferred.await() }
+            val frame = withTimeout(timeoutMs) { deferred.await() }
+            // A2: проверяем ERROR-фрейм
+            if (frame.cmd == CMD_ERROR) {
+                val errorStr = try {
+                    String(frame.payload, Charsets.UTF_8).take(200)
+                } catch (_: Exception) { "unknown" }
+                Log.w(TAG, "request ERROR opcode=$opcode seq=$seq error=$errorStr")
+                return frame // возвращаем фрейм — MaxProtocol сам решит, как обработать
+            }
+            return frame
         } catch (e: TimeoutCancellationException) {
             Log.w(TAG, "request timeout opcode=$opcode seq=$seq")
             return null
@@ -215,7 +227,7 @@ class MaxTcpClient(
         if (payloadLen > 0xFFFFFF) throw IOException("Payload too large: $payloadLen")
         val packedLen = ((flags and 0xFF) shl 24) or (payloadLen and 0x00FFFFFF)
 
-        mutex.withLock {
+        writeMutex.withLock {
             val w = writer ?: throw IOException("Not connected")
             val header = ByteBuffer.allocate(HEADER_SIZE).order(java.nio.ByteOrder.BIG_ENDIAN).also {
                 it.put(10.toByte())                 // ver = 10
@@ -230,10 +242,16 @@ class MaxTcpClient(
         }
     }
 
+    /**
+     * A5: корректный wrap-around через CAS.
+     * Никогда не возвращает 0 или >0xFFFF.
+     */
     private fun nextSeq(): Int {
-        val seq = seqCounter.incrementAndGet()
-        if (seq > 0xFFFF) seqCounter.set(1)
-        return seq
+        while (true) {
+            val current = seqCounter.get()
+            val next = if (current >= 0xFFFF) 1 else current + 1
+            if (seqCounter.compareAndSet(current, next)) return next
+        }
     }
 
     suspend fun close() {

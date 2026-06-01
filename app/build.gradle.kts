@@ -11,8 +11,8 @@ android {
         applicationId = "com.maxmini"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "3.1"
+        versionCode = 5
+        versionName = "3.2"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 

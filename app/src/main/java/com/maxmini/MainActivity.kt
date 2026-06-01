@@ -13,11 +13,13 @@ import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
     companion object {
         private const val PORT = 8085
+        private const val PERMISSION_REQUEST_CODE = 100
     }
 
     private lateinit var webView: WebView
@@ -31,6 +33,9 @@ class MainActivity : AppCompatActivity() {
             javaScriptEnabled = true
             domStorageEnabled = true
             allowFileAccess = false
+            // A16: отключаем file:// URL доступ
+            allowFileAccessFromFileURLs = false
+            allowUniversalAccessFromFileURLs = false
             builtInZoomControls = false
             displayZoomControls = false
             loadWithOverviewMode = true
@@ -41,6 +46,18 @@ class MainActivity : AppCompatActivity() {
         }
         webView.webChromeClient = WebChromeClient()
         setContentView(webView)
+
+        // A15: запрос POST_NOTIFICATIONS runtime permission для Android 13+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    PERMISSION_REQUEST_CODE
+                )
+            }
+        }
 
         // ForegroundService
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
