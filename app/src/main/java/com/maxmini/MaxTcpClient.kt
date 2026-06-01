@@ -11,8 +11,8 @@ import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
 import java.nio.ByteBuffer
 import java.security.SecureRandom
-import java.security.cert.X509Certificate
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import javax.net.ssl.*
 
 /**
@@ -57,7 +57,7 @@ class MaxTcpClient(
     private var coroutineScope: CoroutineScope? = null
     private val pendingRequests = ConcurrentHashMap<Int, CompletableDeferred<Frame>>()
     private val mutex = Mutex()
-    private var seqCounter = 0
+    private val seqCounter = AtomicInteger(0)
 
     // Коллбэки
     var onFrame: ((Frame) -> Unit)? = null
@@ -110,16 +110,13 @@ class MaxTcpClient(
         }
     }
 
+    /**
+     * Используем системный TrustManager — проверка сертификатов включена.
+     */
     private fun createSslSocket(): SSLSocket {
-        val trustAll = object : X509TrustManager {
-            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
-            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
-            override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-        }
         val sslContext = SSLContext.getInstance("TLS")
-        sslContext.init(null, arrayOf(trustAll), SecureRandom())
-        val factory = sslContext.socketFactory
-        return factory.createSocket() as SSLSocket
+        sslContext.init(null, null, SecureRandom()) // системные доверенные CA
+        return sslContext.socketFactory.createSocket() as SSLSocket
     }
 
     private suspend fun startReaderLoop() {
@@ -234,9 +231,9 @@ class MaxTcpClient(
     }
 
     private fun nextSeq(): Int {
-        seqCounter++
-        if (seqCounter > 0xFFFF) seqCounter = 1
-        return seqCounter
+        val seq = seqCounter.incrementAndGet()
+        if (seq > 0xFFFF) seqCounter.set(1)
+        return seq
     }
 
     suspend fun close() {

@@ -1,12 +1,12 @@
 package com.maxmini
 
-import android.os.Build
+import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.*
 import org.msgpack.core.MessagePack
 import org.msgpack.value.Value
-import org.msgpack.value.ValueFactory
 import java.io.File
+import java.util.TimeZone
 
 /**
  * Протокол MAX — правильная реализация с msgpack.
@@ -48,10 +48,7 @@ class MaxProtocol(private val client: MaxTcpClient) {
     @Volatile var connectionAlive: Boolean = false; private set
     @Volatile var connectError: String? = null; private set
 
-    @Volatile private var authCode: String? = null
-    @Volatile private var authEventArrived: Boolean = false
-
-    // Токен
+    // Token
     private var savedToken: String? = null
     private var currentPhone: String? = null
 
@@ -62,6 +59,7 @@ class MaxProtocol(private val client: MaxTcpClient) {
     var onAuthenticated: ((token: String) -> Unit)? = null
     var onMessage: ((Map<String, Any?>) -> Unit)? = null
     var onConnectionLost: ((String?) -> Unit)? = null
+    var onChatsLoaded: ((List<Map<String, Any?>>) -> Unit)? = null
 
     // Ping task
     private var pingJob: Job? = null
@@ -108,23 +106,26 @@ class MaxProtocol(private val client: MaxTcpClient) {
         try {
             val unpacker = MessagePack.newDefaultUnpacker(data)
             val value = unpacker.unpackValue()
-            val map = value.asMapValue()
-            val result = linkedMapOf<String, Any?>()
-            for ((k, v) in map.entrySet()) {
-                // Ключи могут быть строками или байтами (как в PyMax без use_bin_type)
-                val key = when (k.valueType) {
-                    org.msgpack.value.ValueType.STRING -> k.asStringValue().asString()
-                    org.msgpack.value.ValueType.BINARY -> k.asBinaryValue().asByteArray().decodeToString()
-                    org.msgpack.value.ValueType.INTEGER -> k.asIntegerValue().toLong().toString()
-                    else -> k.toString()
-                }
-                result[key] = valueToAny(v)
-            }
-            return result
+            return valueToMap(value)
         } catch (e: Exception) {
             Log.w(TAG, "unpackMap error: ${e.message}")
             return emptyMap()
         }
+    }
+
+    private fun valueToMap(v: Value): Map<String, Any?> {
+        val m = v.asMapValue()
+        val result = linkedMapOf<String, Any?>()
+        for ((k, v2) in m.entrySet()) {
+            val key = when (k.valueType) {
+                org.msgpack.value.ValueType.STRING -> k.asStringValue().asString()
+                org.msgpack.value.ValueType.BINARY -> k.asBinaryValue().asByteArray().decodeToString()
+                org.msgpack.value.ValueType.INTEGER -> k.asIntegerValue().toLong().toString()
+                else -> k.toString()
+            }
+            result[key] = valueToAny(v2)
+        }
+        return result
     }
 
     private fun valueToAny(v: Value): Any? {
@@ -139,23 +140,21 @@ class MaxProtocol(private val client: MaxTcpClient) {
                 val arr = v.asArrayValue()
                 (0 until arr.size()).map { valueToAny(arr.get(it)) }
             }
-            org.msgpack.value.ValueType.MAP -> {
-                val m = v.asMapValue()
-                val result = linkedMapOf<String, Any?>()
-                for ((k, v2) in m.entrySet()) {
-                    val key = when (k.valueType) {
-                        org.msgpack.value.ValueType.STRING -> k.asStringValue().asString()
-                        org.msgpack.value.ValueType.BINARY -> k.asBinaryValue().asByteArray().decodeToString()
-                        org.msgpack.value.ValueType.INTEGER -> k.asIntegerValue().toLong().toString()
-                        else -> k.toString()
-                    }
-                    result[key] = valueToAny(v2)
-                }
-                result
-            }
+            org.msgpack.value.ValueType.MAP -> valueToMap(v)
             else -> v.toString()
         }
     }
+
+    private fun userAgentMap(): Map<String, Any?> = mapOf(
+        "deviceType" to "android",
+        "appVersion" to "2.1.1",
+        "osVersion" to android.os.Build.VERSION.RELEASE,
+        "timezone" to TimeZone.getDefault().id,
+        "screen" to "1080x1920",
+        "locale" to "ru",
+        "deviceLocale" to "ru",
+        "deviceName" to android.os.Build.MODEL
+    )
 
     // ─── Основной API ────────────────────────────────────────────────────
 
@@ -176,8 +175,6 @@ class MaxProtocol(private val client: MaxTcpClient) {
         isConnecting = true
         connectionAlive = false
         connectError = null
-        authCode = null
-        authEventArrived = false
 
         Log.i(TAG, "startAuth: $phone")
         AppStateHelper.addLogEntry("Начинаем подключение к MAX для номера $phone")
@@ -195,19 +192,10 @@ class MaxProtocol(private val client: MaxTcpClient) {
 
             // 2. SESSION_INIT — handshake
             AppStateHelper.addLogEntry("Handshake...")
+            val userAgent = userAgentMap()
             val handshakePayload = msgpackMap(
                 "mt_instanceid" to "",
-                "userAgent" to mapOf(
-                    "deviceType" to "android",
-                    "appVersion" to "2.1.1",
-                    "osVersion" to android.os.Build.VERSION.RELEASE,
-                    "timezone" to "Europe/Moscow",
-                    "screen" to "1080x1920",
-                    "locale" to "ru",
-                    "deviceLocale" to "ru",
-                    "deviceName" to android.os.Build.MODEL,
-                    "headerUserAgent" to "Mozilla/5.0 (Linux; Android ${android.os.Build.VERSION.RELEASE}) AppleWebKit/537.36"
-                ),
+                "userAgent" to userAgent,
                 "clientSessionId" to 42,
                 "deviceId" to AppStateHelper.deviceId
             )
@@ -240,7 +228,7 @@ class MaxProtocol(private val client: MaxTcpClient) {
             }
             AppStateHelper.addLogEntry("SMS-код отправлен, токен: ${authToken.take(8)}...")
 
-            // 4. Ждём код от пользователя
+            // 4. Ждём код от пользователя (через volatile bridge)
             val code = waitForAuthCode()
             if (code.isNullOrEmpty()) {
                 connectError = "Код не получен"
@@ -287,16 +275,7 @@ class MaxProtocol(private val client: MaxTcpClient) {
             // 6. LOGIN — вход с токеном
             AppStateHelper.addLogEntry("Логин...")
             val loginPayload = msgpackMap(
-                "userAgent" to mapOf(
-                    "deviceType" to "android",
-                    "appVersion" to "2.1.1",
-                    "osVersion" to android.os.Build.VERSION.RELEASE,
-                    "timezone" to "Europe/Moscow",
-                    "screen" to "1080x1920",
-                    "locale" to "ru",
-                    "deviceLocale" to "ru",
-                    "deviceName" to android.os.Build.MODEL
-                ),
+                "userAgent" to userAgent,
                 "token" to loginToken,
                 "chatsSync" to -1,
                 "contactsSync" to -1,
@@ -305,7 +284,6 @@ class MaxProtocol(private val client: MaxTcpClient) {
                 "presenceSync" to -1
             )
             val loginResp = client.request(OP_LOGIN, loginPayload) ?: run {
-                // LOGIN может вернуть новый токен в ответе
                 AppStateHelper.addLogEntry("LOGIN OK (без деталей)")
                 isAuthenticated = true
                 isConnecting = false
@@ -315,7 +293,8 @@ class MaxProtocol(private val client: MaxTcpClient) {
                 return true
             }
             val loginData = unpackMap(loginResp.payload)
-            AppStateHelper.addLogEntry("LOGIN успешен, чатов: ${(loginData["chats"] as? List<*>)?.size ?: 0}")
+            val chatsCount = (loginData["chats"] as? List<*>)?.size ?: 0
+            AppStateHelper.addLogEntry("LOGIN успешен, чатов: $chatsCount")
 
             // Обновляем токен из ответа LOGIN если есть
             val newToken = loginData["token"] as? String
@@ -329,6 +308,10 @@ class MaxProtocol(private val client: MaxTcpClient) {
             connectionAlive = true
             startPing()
             onAuthenticated?.invoke(savedToken ?: loginToken)
+
+            // Загружаем список чатов после успешного входа
+            loadChats()
+
             AppStateHelper.addLogEntry("Авторизация успешна!")
             return true
 
@@ -343,19 +326,9 @@ class MaxProtocol(private val client: MaxTcpClient) {
     }
 
     private suspend fun loginByToken(token: String): Boolean {
-        // Пробуем LOGIN с сохранённым токеном
         AppStateHelper.addLogEntry("Пробуем вход по токену...")
         val payload = msgpackMap(
-            "userAgent" to mapOf(
-                "deviceType" to "android",
-                "appVersion" to "2.1.1",
-                "osVersion" to android.os.Build.VERSION.RELEASE,
-                "timezone" to "Europe/Moscow",
-                "screen" to "1080x1920",
-                "locale" to "ru",
-                "deviceLocale" to "ru",
-                "deviceName" to android.os.Build.MODEL
-            ),
+            "userAgent" to userAgentMap(),
             "token" to token,
             "chatsSync" to -1,
             "contactsSync" to -1,
@@ -377,23 +350,33 @@ class MaxProtocol(private val client: MaxTcpClient) {
         return ok
     }
 
-    /**
-     * Вызывается из HTTP handler когда пользователь ввёл SMS-код.
-     */
     fun provideAuthCode(code: String) {
-        authCode = code
-        authEventArrived = true
+        AppState.provideAuthCode(code)
     }
 
     private suspend fun waitForAuthCode(): String? {
-        if (authCode != null) return authCode
-        authEventArrived = false
+        if (AppState.authCode != null) return AppState.authCode
+        AppState.authEventArrived = false
         var waited = 0
-        while (!authEventArrived && authCode == null && waited < 1200) {
+        while (!AppState.authEventArrived && AppState.authCode == null && waited < 1200) {
             delay(100)
             waited++
         }
-        return authCode
+        return AppState.authCode
+    }
+
+    // ─── Загрузка чатов ──────────────────────────────────────────────────
+
+    private suspend fun loadChats() {
+        try {
+            val chats = fetchChats()
+            AppState.chatsCache.clear()
+            AppState.chatsCache.addAll(chats)
+            AppStateHelper.addLogEntry("Загружено ${chats.size} чатов")
+            onChatsLoaded?.invoke(chats)
+        } catch (e: Exception) {
+            AppStateHelper.addLogEntry("Ошибка загрузки чатов: ${e.message}")
+        }
     }
 
     // ─── Heartbeat / Ping ────────────────────────────────────────────────
@@ -454,15 +437,14 @@ class MaxProtocol(private val client: MaxTcpClient) {
         return data["user"] as? Map<String, Any?>
     }
 
-    // ─── Токен ───────────────────────────────────────────────────────────
+    // ─── Токен (SharedPreferences) ───────────────────────────────────────
 
     private fun saveToken(token: String) {
         if (token.isEmpty()) return
         try {
-            val file = File(AppStateHelper.filesDir, "sessions")
-            file.mkdirs()
-            val tokenFile = File(file, "token_${currentPhone?.replace("+", "") ?: "unknown"}.txt")
-            tokenFile.writeText(token)
+            val prefs = AppState.filesDir.resolve("sessions/token_prefs")
+            prefs.parentFile?.mkdirs()
+            prefs.writeText(token)
             Log.i(TAG, "Token saved")
         } catch (e: Exception) {
             Log.w(TAG, "saveToken: ${e.message}")
@@ -470,10 +452,9 @@ class MaxProtocol(private val client: MaxTcpClient) {
     }
 
     private fun loadToken(): String? {
-        val phone = currentPhone ?: return null
         return try {
-            val tokenFile = File(AppStateHelper.filesDir, "sessions/token_${phone.replace("+", "")}.txt")
-            if (tokenFile.exists()) tokenFile.readText().trim().ifEmpty { null } else null
+            val prefs = AppState.filesDir.resolve("sessions/token_prefs")
+            if (prefs.exists()) prefs.readText().trim().ifEmpty { null } else null
         } catch (e: Exception) { null }
     }
 
@@ -486,6 +467,7 @@ class MaxProtocol(private val client: MaxTcpClient) {
         isConnecting = false
         connectionAlive = false
         savedToken = null
+        scope.cancel() // #12: отменяем CoroutineScope
         try { withTimeout(5000) { client.close() } } catch (_: Exception) {}
     }
 }

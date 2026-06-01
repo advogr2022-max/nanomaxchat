@@ -11,10 +11,15 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
+    companion object {
+        private const val PORT = 8085
+    }
+
     private lateinit var webView: WebView
     private var server: MaxHttpServer? = null
 
@@ -51,21 +56,24 @@ class MainActivity : AppCompatActivity() {
 
         // Запуск HTTP-сервера
         try {
-            server = MaxHttpServer(this, 8085)
+            server = MaxHttpServer(this, PORT)
             server?.start()
-            Log.i("MaxMini", "HTTP сервер запущен на :8085")
+            Log.i("MaxMini", "HTTP сервер запущен на :$PORT")
         } catch (e: Exception) {
             Log.e("MaxMini", "Ошибка запуска: ${e.message}")
             Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show()
         }
 
         // Загружаем WebView
-        webView.loadUrl("http://127.0.0.1:8085")
-    }
+        webView.loadUrl("http://127.0.0.1:$PORT")
 
-    override fun onBackPressed() {
-        if (webView.canGoBack()) webView.goBack()
-        else super.onBackPressed()
+        // #9: OnBackPressedDispatcher вместо устаревшего onBackPressed
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (webView.canGoBack()) webView.goBack()
+                else isEnabled = false
+            }
+        })
     }
 
     override fun onDestroy() {
