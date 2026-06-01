@@ -69,7 +69,7 @@ class MainActivity : AppCompatActivity() {
         // Инициализация AppState
         val dataDir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: filesDir
         val deviceId = Build.DEVICE.ifEmpty { Build.MODEL }
-        AppState.init(dataDir, deviceId)
+        AppState.init(dataDir, deviceId, BuildConfig.VERSION_CODE)
 
         // Запуск HTTP-сервера
         try {

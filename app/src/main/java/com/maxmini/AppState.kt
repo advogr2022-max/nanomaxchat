@@ -31,6 +31,7 @@ object AppState {
     // Пути
     lateinit var filesDir: File
     var deviceId: String = "android"
+    var appVersionCode: Int = 0
 
     // Лог
     private val _connLog = CopyOnWriteArrayList<String>()
@@ -40,12 +41,26 @@ object AppState {
     private val timeMsFormatter = DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
     private val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 
-    fun init(filesDir: File, deviceId: String) {
+    fun init(filesDir: File, deviceId: String, appVersionCode: Int = 0) {
         this.filesDir = filesDir
         this.deviceId = deviceId
-        File(filesDir, "sessions").mkdirs()
+        this.appVersionCode = appVersionCode
+        val sessionsDir = File(filesDir, "sessions")
+        val versionFile = File(filesDir, "app_version")
+        val savedVersion = try { versionFile.readText().trim().toIntOrNull() ?: 0 } catch (_: Exception) { 0 }
+        if (appVersionCode > 0 && savedVersion > 0 && savedVersion != appVersionCode) {
+            // Версия изменилась — удаляем старые сессии, токены, кэш
+            connLog("Версия APK изменилась: $savedVersion → $appVersionCode, очищаем сессии")
+            sessionsDir.deleteRecursively()
+            val logDir = File(filesDir, "log")
+            logDir.deleteRecursively()
+        }
+        sessionsDir.mkdirs()
         File(filesDir, "log").mkdirs()
-        connLog("AppState инициализирован")
+        if (appVersionCode > 0) {
+            try { versionFile.writeText(appVersionCode.toString()) } catch (_: Exception) {}
+        }
+        connLog("AppState инициализирован v$appVersionCode")
     }
 
     fun connLog(msg: String) {

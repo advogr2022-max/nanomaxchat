@@ -245,7 +245,30 @@ class MaxHttpServer(private val ctx: Context, port: Int) : NanoHTTPD("127.0.0.1"
 
     private fun apiChats(): Response {
         if (!AppState.isAuthenticated) return jsonResponse(401, mapOf("ok" to false, "error" to "Не авторизован"))
-        val chats = AppState.chatsCache.toList()
+        val rawChats = AppState.chatsCache.toList()
+        // Нормализуем чаты: добавляем name fallback для DIALOG без названия
+        val chats = rawChats.map { chat ->
+            val map = chat.toMutableMap()
+            if (map["title"] !is String || (map["title"] as? String).orEmpty().isEmpty()) {
+                val type = map["type"] as? String ?: ""
+                val id = map["id"] ?: map["chat_id"] ?: 0
+                if (type == "DIALOG") {
+                    val participants = map["participants"] as? Map<*, *>
+                    if (participants != null && participants.isNotEmpty()) {
+                        val otherId = participants.keys.firstOrNull { it.toString() != "0" }
+                        map["title"] = "Диалог #${otherId ?: id}"
+                        map["name"] = "Диалог #${otherId ?: id}"
+                    } else {
+                        map["title"] = "Диалог #$id"
+                        map["name"] = "Диалог #$id"
+                    }
+                } else {
+                    map["title"] = "Чат #$id"
+                    map["name"] = "Чат #$id"
+                }
+            }
+            map
+        }
         return jsonOk(mapOf("chats" to chats))
     }
 

@@ -411,8 +411,34 @@ class MaxProtocol(private val client: MaxTcpClient) {
             AppState.chatsCache.clear()
             AppState.chatsCache.addAll(chatMaps)
             AppStateHelper.addLogEntry("Загружено ${chatMaps.size} чатов из LOGIN")
+            // Логируем структуру первого чата для отладки
+            if (chatMaps.isNotEmpty()) {
+                val first = chatMaps.first()
+                val keys = first.keys.joinToString(", ")
+                val type = first["type"]
+                val title = first["title"]
+                val id = first["id"]
+                AppStateHelper.addLogEntry("Первый чат: id=$id type=$type title=$title keys=[$keys]")
+            }
+            if (chatMaps.isEmpty()) {
+                // Если чатов нет в LOGIN — пробуем загрузить отдельно
+                AppStateHelper.addLogEntry("LOGIN ответ без чатов, пробуем fetchChats...")
+                val fetchedChats = fetchChats()
+                if (fetchedChats.isNotEmpty()) {
+                    AppState.chatsCache.clear()
+                    AppState.chatsCache.addAll(fetchedChats)
+                    AppStateHelper.addLogEntry("Загружено ${fetchedChats.size} чатов через fetchChats")
+                }
+            }
         } else {
             AppStateHelper.addLogEntry("LOGIN ответ без поля chats")
+            // Пробуем загрузить чаты отдельно
+            val fetchedChats = fetchChats()
+            if (fetchedChats.isNotEmpty()) {
+                AppState.chatsCache.clear()
+                AppState.chatsCache.addAll(fetchedChats)
+                AppStateHelper.addLogEntry("Загружено ${fetchedChats.size} чатов через fetchChats")
+            }
         }
 
         AppState.isAuthenticated = true
