@@ -403,6 +403,18 @@ class MaxProtocol(private val client: MaxTcpClient) {
             saveToken(newToken)
         }
 
+        // Сохраняем чаты из LOGIN ответа (как PyMax: cli.chats = chats из login)
+        val chats = loginData["chats"] as? List<*>
+        if (chats != null) {
+            @Suppress("UNCHECKED_CAST")
+            val chatMaps = chats.filterIsInstance<Map<String, Any?>>()
+            AppState.chatsCache.clear()
+            AppState.chatsCache.addAll(chatMaps)
+            AppStateHelper.addLogEntry("Загружено ${chatMaps.size} чатов из LOGIN")
+        } else {
+            AppStateHelper.addLogEntry("LOGIN ответ без поля chats")
+        }
+
         AppState.isAuthenticated = true
         AppState.connectionAlive = true
         startPing()

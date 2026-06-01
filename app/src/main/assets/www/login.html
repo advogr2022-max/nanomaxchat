@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MAX Chat — Вход</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #0a0f1e 0%, #1a2342 50%, #0d1a3a 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #e0e6f0;
+    }
+
+    .login-container {
+      width: 100%;
+      max-width: 520px;
+      padding: 20px;
+    }
+
+    .logo {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+
+    .logo-icon {
+      width: 72px; height: 72px;
+      background: linear-gradient(135deg, #3b82f6, #6366f1);
+      border-radius: 20px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 36px;
+      font-weight: 800;
+      color: #fff;
+      margin-bottom: 16px;
+      box-shadow: 0 8px 32px rgba(59, 130, 246, 0.3);
+    }
+
+    .logo h1 {
+      font-size: 28px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #60a5fa, #a78bfa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .logo p {
+      font-size: 14px;
+      color: #8892a8;
+      margin-top: 6px;
+    }
+
+    .card {
+      background: rgba(22, 30, 52, 0.85);
+      border: 1px solid rgba(100, 116, 170, 0.2);
+      border-radius: 16px;
+      padding: 32px;
+      backdrop-filter: blur(20px);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+    }
+
+    .step-indicator {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 24px;
+    }
+
+    .step-dot {
+      flex: 1;
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(100, 116, 170, 0.2);
+      transition: background 0.3s;
+    }
+
+    .step-dot.active { background: #3b82f6; }
+    .step-dot.done { background: #22c55e; }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #8892a8;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 12px 16px;
+      background: rgba(10, 15, 30, 0.6);
+      border: 1px solid rgba(100, 116, 170, 0.25);
+      border-radius: 10px;
+      color: #e0e6f0;
+      font-size: 15px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      outline: none;
+    }
+
+    .form-group input:focus {
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    }
+
+    .form-group input::placeholder {
+      color: #4a5568;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-transform: none;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #3b82f6, #6366f1);
+      color: #fff;
+      box-shadow: 0 4px 16px rgba(59, 130, 246, 0.3);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+    }
+
+    .btn-primary:active {
+      transform: translateY(0);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-secondary {
+      background: rgba(100, 116, 170, 0.15);
+      color: #8892a8;
+      margin-top: 12px;
+    }
+
+    .btn-secondary:hover {
+      background: rgba(100, 116, 170, 0.25);
+    }
+
+    .btn-resend {
+      background: rgba(251, 191, 36, 0.12);
+      color: #fbbf24;
+      margin-top: 12px;
+      border: 1px solid rgba(251, 191, 36, 0.25);
+      font-size: 13px;
+      padding: 10px 14px;
+    }
+
+    .btn-resend:hover {
+      background: rgba(251, 191, 36, 0.22);
+    }
+
+    .btn-resend:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-retry {
+      background: rgba(59, 130, 246, 0.12);
+      color: #60a5fa;
+      margin-top: 16px;
+      border: 1px solid rgba(59, 130, 246, 0.25);
+      font-size: 14px;
+      padding: 12px 16px;
+      display: none;
+    }
+
+    .btn-retry:hover {
+      background: rgba(59, 130, 246, 0.22);
+    }
+
+    .btn-retry.visible {
+      display: block;
+    }
+
+    .resend-timer {
+      font-size: 12px;
+      color: #6b7280;
+      text-align: center;
+      margin-top: 8px;
+    }
+
+    .btn-session {
+      background: rgba(34, 197, 94, 0.15);
+      color: #4ade80;
+      margin-top: 8px;
+      border: 1px solid rgba(34, 197, 94, 0.3);
+    }
+
+    .btn-session:hover {
+      background: rgba(34, 197, 94, 0.25);
+    }
+
+    .error-msg {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #f87171;
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-size: 13px;
+      margin-bottom: 16px;
+      display: none;
+    }
+
+    .error-msg.show { display: block; }
+
+    .info-box {
+      background: rgba(59, 130, 246, 0.08);
+      border: 1px solid rgba(59, 130, 246, 0.2);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 20px;
+      font-size: 13px;
+      color: #93b4f5;
+      line-height: 1.5;
+    }
+
+    .step-section {
+      display: none;
+    }
+
+    .step-section.visible {
+      display: block;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 18px; height: 18px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .status-text {
+      text-align: center;
+      font-size: 13px;
+      color: #8892a8;
+      margin-top: 16px;
+    }
+
+    .status-text.success { color: #22c55e; }
+    .status-text.error { color: #f87171; }
+
+    .hidden { display: none !important; }
+
+    /* ─── Лог соединения ─── */
+    .conn-log-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 20px;
+      margin-bottom: 8px;
+    }
+
+    .conn-log {
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(100, 116, 170, 0.15);
+      border-radius: 10px;
+      padding: 12px;
+      max-height: 200px;
+      overflow-y: auto;
+      font-family: 'Courier New', Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.6;
+      color: #8892a8;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(100,116,170,0.2) transparent;
+    }
+
+    .conn-log::-webkit-scrollbar { width: 4px; }
+    .conn-log::-webkit-scrollbar-track { background: transparent; }
+    .conn-log::-webkit-scrollbar-thumb { background: rgba(100,116,170,0.2); border-radius: 2px; }
+
+    .log-line { white-space: pre-wrap; word-break: break-all; }
+    .log-line.log-error { color: #f87171; }
+    .log-line.log-warn { color: #fbbf24; }
+    .log-line.log-info { color: #8892a8; }
+
+    /* Сессии */
+    .sessions-list {
+      margin-top: 8px;
+    }
+
+    .session-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      background: rgba(10, 15, 30, 0.6);
+      border: 1px solid rgba(100, 116, 170, 0.15);
+      border-radius: 8px;
+      margin-bottom: 8px;
+    }
+
+    .session-phone {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .session-btn {
+      padding: 6px 14px;
+      background: rgba(34, 197, 94, 0.15);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      border-radius: 6px;
+      color: #4ade80;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .session-btn:hover {
+      background: rgba(34, 197, 94, 0.25);
+    }
+
+    .divider {
+      text-align: center;
+      color: #4a5568;
+      font-size: 12px;
+      margin: 16px 0;
+      position: relative;
+    }
+
+    .divider::before,
+    .divider::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      width: 40%;
+      height: 1px;
+      background: rgba(100, 116, 170, 0.15);
+    }
+
+    .divider::before { left: 0; }
+    .divider::after { right: 0; }
+  </style>
+</head>
+<body>
+  <div class="login-container">
+    <div class="logo">
+      <div class="logo-icon">M</div>
+      <h1>MAX Chat</h1>
+      <p>Легковесный веб-клиент мессенджера MAX</p>
+    </div>
+
+    <div class="card">
+      <div class="step-indicator">
+        <div class="step-dot active" id="step1dot"></div>
+        <div class="step-dot" id="step2dot"></div>
+        <div class="step-dot" id="step3dot"></div>
+      </div>
+
+      <div class="error-msg" id="errorMsg"></div>
+
+      <!-- Шаг 1: Ввод телефона -->
+      <div id="step1" class="step-section visible">
+        <div class="info-box">
+          Введите номер телефона для авторизации через SMS-код.
+          Формат: +7XXXXXXXXXX
+        </div>
+
+        <!-- Сохранённые сессии -->
+        <div id="sessionsBlock" style="display:none">
+          <div class="sessions-list" id="sessionsList"></div>
+          <div class="divider">или войдите заново</div>
+        </div>
+
+        <div class="form-group">
+          <label>Номер телефона</label>
+          <input type="tel" id="phoneNumber" placeholder="+7XXXXXXXXXX" autocomplete="off">
+        </div>
+        <button class="btn btn-primary" id="sendCodeBtn" onclick="sendCode()">
+          Отправить SMS-код
+        </button>
+      </div>
+
+      <!-- Шаг 2: Ожидание подключения + ввод SMS-кода -->
+      <div id="step2" class="step-section">
+        <div class="info-box">
+          Подключение к серверам MAX... Когда код будет запрошен, поле ввода появится ниже.
+        </div>
+        <div class="form-group" id="codeGroup" style="display:none">
+          <label>SMS-код</label>
+          <input type="text" id="smsCode" placeholder="Введите код из SMS" autocomplete="off" maxlength="6">
+        </div>
+        <button class="btn btn-secondary" id="backBtn" onclick="goBackToStep1()" style="display:none;margin-top:8px">
+          ← Назад
+        </button>
+        <button class="btn btn-primary" id="verifyCodeBtn" onclick="verifyCode()" style="display:none">
+          Подтвердить код
+        </button>
+        <button class="btn btn-resend" id="resendBtn" onclick="resendCode()" style="display:none" disabled>
+          Отправить SMS повторно
+        </button>
+        <div class="resend-timer" id="resendTimer" style="display:none">
+          Повторная отправка через <span id="resendCountdown">60</span> сек.
+        </div>
+        <button class="btn btn-retry" id="retryBtn" onclick="retryConnect()">
+          Попробовать снова
+        </button>
+        <div class="status-text" id="statusText"></div>
+      </div>
+
+      <!-- Шаг 3: 2FA пароль (если нужен) -->
+      <div id="step3" class="step-section">
+        <div class="info-box">
+          Аккаунт защищён двухфакторной аутентификацией. Введите пароль.
+          <br><span id="faHint"></span>
+        </div>
+        <div class="form-group">
+          <label>Пароль 2FA</label>
+          <input type="password" id="faPassword" placeholder="Введите пароль" autocomplete="off">
+        </div>
+        <button class="btn btn-primary" id="verifyFaBtn" onclick="verifyPassword()">
+          Подтвердить пароль
+        </button>
+      </div>
+
+      <!-- Лог соединения — всегда видимый под кнопками -->
+      <div class="conn-log-label">Лог соединения</div>
+      <div class="conn-log" id="connLog">
+        <div class="log-line log-info">Ожидание подключения...</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ─── Состояние ───
+    let logOffset = 0;
+    let logTimer = null;
+    let statusTimer = null;
+    let currentPhone = '';
+    let resendCountdownTimer = null;
+    let resendCountdown = 0;
+
+    // ─── Инициализация ───
+    (async function init() {
+      await loadSessions();
+      // Проверяем, есть ли активная авторизация
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        if (data.authenticated) {
+          window.location.href = '/chat';
+          return;
+        }
+      } catch (e) {}
+      startLogPolling();
+    })();
+
+    // ─── Загрузка сохранённых сессий ───
+    async function loadSessions() {
+      try {
+        const res = await fetch('/api/sessions');
+        const data = await res.json();
+        if (data.sessions && data.sessions.length > 0) {
+          const block = document.getElementById('sessionsBlock');
+          const list = document.getElementById('sessionsList');
+          list.innerHTML = data.sessions.map(s => `
+            <div class="session-item">
+              <span class="session-phone">${escHtml(s.phone)}</span>
+              <button class="session-btn" onclick="useSession('${escAttr(s.phone)}')">Войти</button>
+            </div>
+          `).join('');
+          block.style.display = 'block';
+        }
+      } catch (e) {}
+    }
+
+    // ─── Вход по сохранённой сессии ───
+    async function useSession(phone) {
+      currentPhone = phone;
+      goToStep(2);
+      setStatus('Подключение с сохранённой сессией...', '');
+
+      try {
+        const res = await fetch('/api/use-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone }),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          showError(data.error || 'Ошибка подключения');
+          goToStep(1);
+          return;
+        }
+      } catch (e) {
+        showError('Ошибка: ' + e.message);
+        goToStep(1);
+        return;
+      }
+
+      startStatusPolling();
+    }
+
+    // ─── Шаг 1: Отправка SMS-кода ───
+    async function sendCode() {
+      const phone = document.getElementById('phoneNumber').value.trim();
+      if (!phone) {
+        showError('Введите номер телефона');
+        return;
+      }
+
+      currentPhone = phone;
+      hideError();
+
+      const btn = document.getElementById('sendCodeBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Подключение...';
+
+      try {
+        const res = await fetch('/api/send-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone }),
+        });
+        const data = await res.json();
+
+        if (!data.ok) {
+          showError(data.error || 'Ошибка отправки кода');
+          btn.disabled = false;
+          btn.textContent = 'Отправить SMS-код';
+          return;
+        }
+
+        goToStep(2);
+        setStatus('Подключение к серверам MAX...', '');
+        startStatusPolling();
+
+      } catch (e) {
+        showError('Ошибка: ' + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Отправить SMS-код';
+      }
+    }
+
+    // ─── Шаг 2: Ввод SMS-кода ───
+    async function verifyCode() {
+      const code = document.getElementById('smsCode').value.trim();
+      if (!code) {
+        showError('Введите SMS-код');
+        return;
+      }
+
+      hideError();
+      const btn = document.getElementById('verifyCodeBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Проверка...';
+
+      try {
+        const res = await fetch('/api/verify-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code }),
+        });
+        const data = await res.json();
+
+        if (data.ok) {
+          setStatus('Авторизация успешна! Переход в чат...', 'success');
+          setTimeout(() => { window.location.href = '/chat'; }, 800);
+        } else if (data.error === '2FA_REQUIRED') {
+          // Нужен пароль 2FA
+          goToStep(3);
+          if (data.hint) {
+            document.getElementById('faHint').textContent = 'Подсказка: ' + data.hint;
+          }
+        } else {
+          showError(data.error || 'Ошибка верификации кода');
+        }
+      } catch (e) {
+        showError('Ошибка: ' + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Подтвердить код';
+      }
+    }
+
+    // ─── Шаг 3: 2FA пароль ───
+    async function verifyPassword() {
+      const password = document.getElementById('faPassword').value.trim();
+      if (!password) {
+        showError('Введите пароль');
+        return;
+      }
+
+      hideError();
+      const btn = document.getElementById('verifyFaBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Проверка...';
+
+      try {
+        const res = await fetch('/api/verify-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password }),
+        });
+        const data = await res.json();
+
+        if (data.ok) {
+          setStatus('Авторизация успешна! Переход в чат...', 'success');
+          setTimeout(() => { window.location.href = '/chat'; }, 800);
+        } else {
+          showError(data.error || 'Неверный пароль');
+        }
+      } catch (e) {
+        showError('Ошибка: ' + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Подтвердить пароль';
+      }
+    }
+
+    // ─── Управление шагами ───
+    function goToStep(n) {
+      document.getElementById('step1').classList.toggle('visible', n === 1);
+      document.getElementById('step2').classList.toggle('visible', n === 2);
+      document.getElementById('step3').classList.toggle('visible', n === 3);
+
+      for (let i = 1; i <= 3; i++) {
+        const dot = document.getElementById('step' + i + 'dot');
+        dot.className = 'step-dot';
+        if (i < n) dot.classList.add('done');
+        if (i === n) dot.classList.add('active');
+      }
+
+      hideError();
+
+      // Очищаем таймер повторной отправки при уходе с шага 2
+      if (n !== 2) {
+        stopResendTimer();
+      }
+    }
+
+    function showError(msg) {
+      const el = document.getElementById('errorMsg');
+      el.textContent = msg;
+      el.classList.add('show');
+    }
+
+    function hideError() {
+      document.getElementById('errorMsg').classList.remove('show');
+    }
+
+    function setStatus(msg, cls) {
+      const el = document.getElementById('statusText');
+      el.textContent = msg;
+      el.className = 'status-text ' + (cls || '');
+    }
+
+    // ─── Попробовать снова ───
+    async function retryConnect() {
+      // Возвращаемся на шаг 1 — ввод телефона
+      document.getElementById('retryBtn').classList.remove('visible');
+      goToStep(1);
+      // Очищаем состояние
+      if (statusTimer) clearTimeout(statusTimer);
+      stopResendTimer();
+    }
+
+    // ─── Кнопка «Назад» ───
+    function goBackToStep1() {
+      if (statusTimer) clearTimeout(statusTimer);
+      stopResendTimer();
+      goToStep(1);
+      document.getElementById('retryBtn').classList.remove('visible');
+      document.getElementById('codeGroup').style.display = 'none';
+      document.getElementById('verifyCodeBtn').style.display = 'none';
+      document.getElementById('resendBtn').style.display = 'none';
+      document.getElementById('resendTimer').style.display = 'none';
+      document.getElementById('backBtn').style.display = 'none';
+    }
+
+    // ─── Поллинг статуса ───
+    function startStatusPolling() {
+      if (statusTimer) clearTimeout(statusTimer);
+      checkStatusRecursive();
+    }
+
+    async function checkStatusRecursive() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+
+        if (data.token) {
+          localStorage.setItem('max_token', data.token);
+        }
+
+        if (data.authenticated) {
+          setStatus('Авторизация успешна! Переход в чат...', 'success');
+          stopResendTimer();
+          setTimeout(() => { window.location.href = '/chat'; }, 800);
+          return;
+        }
+
+        if (data.error) {
+          setStatus('Ошибка: ' + data.error, 'error');
+          stopResendTimer();
+          document.getElementById('retryBtn').classList.add('visible');
+          return;
+        }
+
+        if (data.waiting_for_code) {
+          setStatus('SMS-код отправлен! Введите код ниже.', 'success');
+          // Показываем поле ввода кода
+          document.getElementById('codeGroup').style.display = 'block';
+          document.getElementById('verifyCodeBtn').style.display = 'block';
+          document.getElementById('backBtn').style.display = 'block';
+          document.getElementById('smsCode').focus();
+          // Скрываем кнопку повтора
+          document.getElementById('retryBtn').classList.remove('visible');
+
+          // Управляем кнопкой повторной отправки и таймером
+          document.getElementById('resendBtn').style.display = 'block';
+          if (data.sms_can_resend) {
+            // Можно отправить повторно
+            document.getElementById('resendBtn').disabled = false;
+            document.getElementById('resendTimer').style.display = 'none';
+            stopResendTimer();
+          } else if (data.sms_cooldown_remaining > 0) {
+            // Показываем обратный отсчёт
+            document.getElementById('resendBtn').disabled = true;
+            document.getElementById('resendTimer').style.display = 'block';
+            startResendCountdown(data.sms_cooldown_remaining);
+          }
+        } else if (data.waiting_for_2fa) {
+          goToStep(3);
+          stopResendTimer();
+          return;
+        } else if (data.connecting) {
+          setStatus('Подключение к серверам MAX...', '');
+        }
+
+        statusTimer = setTimeout(checkStatusRecursive, 1500);
+      } catch (e) {
+        console.error('Status check failed:', e);
+        statusTimer = setTimeout(checkStatusRecursive, 3000);
+      }
+    }
+
+    // ─── Таймер обратного отсчёта для повторной отправки SMS ───
+    function startResendCountdown(seconds) {
+      resendCountdown = seconds;
+      document.getElementById('resendCountdown').textContent = resendCountdown;
+
+      if (resendCountdownTimer) clearInterval(resendCountdownTimer);
+      resendCountdownTimer = setInterval(() => {
+        resendCountdown--;
+        if (resendCountdown <= 0) {
+          stopResendTimer();
+          document.getElementById('resendBtn').disabled = false;
+          document.getElementById('resendTimer').style.display = 'none';
+        } else {
+          document.getElementById('resendCountdown').textContent = resendCountdown;
+        }
+      }, 1000);
+    }
+
+    function stopResendTimer() {
+      if (resendCountdownTimer) {
+        clearInterval(resendCountdownTimer);
+        resendCountdownTimer = null;
+      }
+    }
+
+    // ─── Повторная отправка SMS ───
+    async function resendCode() {
+      const btn = document.getElementById('resendBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Отправка...';
+
+      try {
+        const res = await fetch('/api/resend-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        const data = await res.json();
+
+        if (data.ok) {
+          setStatus('Повторный SMS-код отправлен!', 'success');
+          // Скрываем поле кода до нового запроса от сервера
+          document.getElementById('codeGroup').style.display = 'none';
+          document.getElementById('verifyCodeBtn').style.display = 'none';
+          document.getElementById('resendBtn').style.display = 'none';
+          document.getElementById('resendTimer').style.display = 'none';
+          stopResendTimer();
+        } else {
+          showError(data.error || 'Ошибка повторной отправки');
+          if (data.cooldown_remaining) {
+            startResendCountdown(data.cooldown_remaining);
+            document.getElementById('resendTimer').style.display = 'block';
+          } else {
+            btn.disabled = false;
+          }
+        }
+      } catch (e) {
+        showError('Ошибка: ' + e.message);
+        btn.disabled = false;
+      } finally {
+        btn.textContent = 'Отправить SMS повторно';
+      }
+    }
+
+    // ─── Поллинг лога ───
+    function startLogPolling() {
+      if (logTimer) clearTimeout(logTimer);
+      fetchLogRecursive();
+    }
+
+    async function fetchLogRecursive() {
+      try {
+        const res = await fetch('/api/log?after=' + logOffset);
+        const data = await res.json();
+        if (data.log && data.log.length > 0) {
+          const container = document.getElementById('connLog');
+          for (const entry of data.log) {
+            const div = document.createElement('div');
+            div.className = 'log-line';
+            if (entry.includes('[ERROR]')) div.classList.add('log-error');
+            else if (entry.includes('[WARN]')) div.classList.add('log-warn');
+            else div.classList.add('log-info');
+            div.textContent = entry;
+            container.appendChild(div);
+          }
+          logOffset = data.total;
+          // Автопрокрутка вниз
+          container.scrollTop = container.scrollHeight;
+        }
+        logTimer = setTimeout(fetchLogRecursive, 1000);
+      } catch (e) {
+        console.error('Log fetch failed:', e);
+        logTimer = setTimeout(fetchLogRecursive, 2000);
+      }
+    }
+
+    // ─── Auth headers ───
+    function getAuthHeaders() {
+      const token = localStorage.getItem('max_token');
+      return token ? { 'Authorization': 'Bearer ' + token } : {};
+    }
+
+    // ─── Утилиты ───
+    function escHtml(text) {
+      if (!text) return '';
+      const div = document.createElement('div');
+      div.textContent = String(text);
+      return div.innerHTML;
+    }
+
+    function escAttr(text) {
+      if (!text) return '';
+      return String(text).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    // ─── Обработка Enter ───
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const step1 = document.getElementById('step1');
+        const step2 = document.getElementById('step2');
+        const step3 = document.getElementById('step3');
+        if (step1.classList.contains('visible')) sendCode();
+        else if (step2.classList.contains('visible')) verifyCode();
+        else if (step3.classList.contains('visible')) verifyPassword();
+      }
+    });
+  </script>
+</body>
+</html>
