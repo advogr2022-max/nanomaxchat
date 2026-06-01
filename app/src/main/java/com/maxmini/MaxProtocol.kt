@@ -471,32 +471,55 @@ class MaxProtocol(private val client: MaxTcpClient) {
         if (profile != null) {
             @Suppress("UNCHECKED_CAST")
             AppState.userProfile = profile as Map<String, Any?>
-            AppStateHelper.addLogEntry("Профиль: keys=[${profile.keys.joinToString(",")}]")
+            AppStateHelper.addLogEntry("Профиль: keys=[${profile.keys.joinToString(",")}] values=[${profile.values.map { it?.let { v -> if (v is String) v.take(20) else v } }}]")
 
-            var userId: Long? = (profile["userId"] as? Number)?.toLong()
-            if (userId == null || userId <= 0) {
-                userId = (profile["id"] as? Number)?.toLong()
+            var userId: Long? = null
+            // Пробуем ВСЕ возможные имена полей в profile
+            for (key in listOf("userId", "user_id", "id", "uid", "accountId", "account_id")) {
+                val v = profile[key]
+                if (v is Number && v.toLong() > 0) { userId = v.toLong(); break }
             }
+            // Пробуем вложенный объект user
             if (userId == null || userId <= 0) {
                 val userMap = profile["user"] as? Map<*, *>
-                userId = (userMap?.get("userId") as? Number)?.toLong()
-                    ?: (userMap?.get("id") as? Number)?.toLong()
+                if (userMap != null) {
+                    AppStateHelper.addLogEntry("Вложенный user: keys=[${userMap.keys.joinToString(",")}]")
+                    for (key in listOf("userId", "user_id", "id", "uid")) {
+                        val v = userMap[key]
+                        if (v is Number && v.toLong() > 0) { userId = v.toLong(); break }
+                    }
+                    // Если нашли user-объект — сохраняем его поля в usersCache
+                    val uid2 = userId ?: 0
+                    if (uid2 > 0) {
+                        @Suppress("UNCHECKED_CAST")
+                        AppState.usersCache[uid2] = userMap as Map<String, Any?>
+                    }
+                }
             }
+            // Пробуем loginData.userId
             if (userId == null || userId <= 0) {
-                userId = (loginData["userId"] as? Number)?.toLong()
+                for (key in listOf("userId", "user_id", "id")) {
+                    val v = loginData[key]
+                    if (v is Number && v.toLong() > 0) { userId = v.toLong(); break }
+                }
             }
             if (userId != null && userId > 0) {
                 AppState.currentUserId = userId
                 AppStateHelper.addLogEntry("ID пользователя: $userId")
             } else {
-                AppStateHelper.addLogEntry("ПРЕДУПРЕЖДЕНИЕ: не удалось извлечь userId из профиля!")
+                AppStateHelper.addLogEntry("ПРЕДУПРЕЖДЕНИЕ: не удалось извлечь userId! loginData keys=[${loginData.keys.joinToString(",")}]")
             }
         } else {
             AppStateHelper.addLogEntry("LOGIN ответ без profile")
-            val uid = loginData["userId"] as? Number
-            if (uid != null) {
-                AppState.currentUserId = uid.toLong()
-                AppStateHelper.addLogEntry("userId из loginData: ${uid.toLong()}")
+            AppStateHelper.addLogEntry("Все ключи loginData: [${loginData.keys.joinToString(",")}]")
+            var userId: Long? = null
+            for (key in listOf("userId", "user_id", "id", "uid")) {
+                val v = loginData[key]
+                if (v is Number && v.toLong() > 0) { userId = v.toLong(); break }
+            }
+            if (userId != null && userId > 0) {
+                AppState.currentUserId = userId
+                AppStateHelper.addLogEntry("userId из loginData: $userId")
             }
         }
 

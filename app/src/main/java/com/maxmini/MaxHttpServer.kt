@@ -264,16 +264,25 @@ class MaxHttpServer(private val ctx: Context, port: Int) : NanoHTTPD("127.0.0.1"
                     // participants — это List<Map>, не Map
                     val participants = map["participants"] as? List<*>
                     var otherName: String? = null
+                    var foundUid: Long = 0
                     if (participants != null) {
                         for (p in participants) {
                             if (p is Map<*, *>) {
                                 val uid = (p["id"] as? Number)?.toLong() ?: 0
-                                if (uid != meId && uid > 0) {
-                                    otherName = (p["name"] as? String)
-                                        ?: (p["firstName"] as? String)
+                                if (uid > 0) {
                                     @Suppress("UNCHECKED_CAST")
                                     AppState.usersCache[uid] = p as Map<String, Any?>
-                                    break
+                                    // Если meId неизвестен — ищем любого с именем
+                                    if (meId <= 0) {
+                                        val pName = participantName(p)
+                                        if (pName != null) {
+                                            if (foundUid == 0L) { foundUid = uid; otherName = pName }
+                                        }
+                                    } else if (uid != meId) {
+                                        foundUid = uid
+                                        otherName = participantName(p)
+                                        break
+                                    }
                                 }
                             }
                         }
@@ -283,8 +292,7 @@ class MaxHttpServer(private val ctx: Context, port: Int) : NanoHTTPD("127.0.0.1"
                         val chatIdLong = (id as? Number)?.toLong() ?: id.toString().toLongOrNull() ?: 0
                         val cachedUser = AppState.usersCache[chatIdLong]
                         if (cachedUser != null) {
-                            otherName = (cachedUser["name"] as? String)
-                                ?: (cachedUser["firstName"] as? String)
+                            otherName = participantName(cachedUser)
                         }
                     }
                     val displayName = if (!otherName.isNullOrEmpty()) otherName else "Диалог #$id"
@@ -302,7 +310,9 @@ class MaxHttpServer(private val ctx: Context, port: Int) : NanoHTTPD("127.0.0.1"
                     for (p in participants) {
                         if (p is Map<*, *>) {
                             val uid = (p["id"] as? Number)?.toLong() ?: 0
-                            if (uid != meId && uid > 0) {
+                            if (meId <= 0) {
+                                if (uid > 0) { map["phone"] = p["phone"] as? String ?: ""; break }
+                            } else if (uid != meId && uid > 0) {
                                 map["phone"] = p["phone"] as? String ?: ""
                                 break
                             }
@@ -353,7 +363,7 @@ class MaxHttpServer(private val ctx: Context, port: Int) : NanoHTTPD("127.0.0.1"
         return jsonOk(mapOf("messages" to emptyList<Any>()))
     }
 
-    /** Добавляет outgoing и нормализует поля сообщений */
+    /** Добавляет outgoing, senderName и нормализует поля сообщений */
     private fun normalizeMessages(msgs: List<Map<String, Any?>>, chatId: Long): List<Map<String, Any?>> {
         val meId = AppState.currentUserId
         return msgs.map { msg ->
@@ -365,24 +375,28 @@ class MaxHttpServer(private val ctx: Context, port: Int) : NanoHTTPD("127.0.0.1"
                 ?: (m["from"] as? Number)?.toLong()
                 ?: 0
 
-            // Определяем outgoing с fallback
+            // Определяем outgoing — используем статус доставки как fallback когда meId==0
             val isOut = if (meId > 0) {
                 sender > 0 && sender == meId
-            } else {
-                (m["outgoing"] as? Boolean) == true
+            } else if (sender > 0) {
+                // Если meId неизвестен — свои сообщения имеют поле status
+                (m["status"] as? String) != null
+                    || (m["outgoing"] as? Boolean) == true
                     || (m["fromMe"] as? Boolean) == true
                     || (m["isOutgoing"] as? Boolean) == true
+            } else {
+                false
             }
             m["outgoing"] = isOut
             if (sender > 0) m["senderId"] = sender
 
-            // Имя отправителя из кэша
+            // Имя отправителя — всегда с fallback
             if (sender > 0) {
                 val cachedUser = AppState.usersCache[sender]
                 if (cachedUser != null) {
-                    m["senderName"] = (cachedUser["name"] as? String)
-                        ?: (cachedUser["firstName"] as? String)
-                        ?: "Пользователь"
+                    m["senderName"] = participantName(cachedUser) ?: "ID:$sender"
+                } else {
+                    m["senderName"] = "ID:$sender"
                 }
             }
 
@@ -482,6 +496,21 @@ class MaxHttpServer(private val ctx: Context, port: Int) : NanoHTTPD("127.0.0.1"
     }
 
     // ─── Helpers ───────────────────────────────────────────────────────
+
+    /** Комбинирует firstName+lastName из Map участника */
+    private fun participantName(p: Map<*, *>): String? {
+        return (p["name"] as? String)
+            ?: run {
+                val fn = p["firstName"] as? String
+                val ln = p["lastName"] as? String
+                when {
+                    fn != null && ln != null -> "$fn $ln"
+                    fn != null -> fn
+                    ln != null -> ln
+                    else -> null
+                }
+            }
+    }
 
     private fun parseBody(session: IHTTPSession): String {
         val files = HashMap<String, String>()

@@ -52,9 +52,13 @@ object AppState {
         val versionFile = File(filesDir, "app_version")
         val savedVersion = try { versionFile.readText().trim().toIntOrNull() ?: 0 } catch (_: Exception) { 0 }
         if (appVersionCode > 0 && savedVersion > 0 && savedVersion != appVersionCode) {
-            // Версия изменилась — удаляем старые сессии, токены, кэш
-            connLog("Версия APK изменилась: $savedVersion → $appVersionCode, очищаем сессии")
-            sessionsDir.deleteRecursively()
+            connLog("Версия APK изменилась: $savedVersion → $appVersionCode")
+            // Удаляем сессии только при мажорном изменении (разница >= 5)
+            if (kotlin.math.abs(appVersionCode - savedVersion) >= 5) {
+                connLog("Мажорное изменение версии, очищаем сессии")
+                sessionsDir.deleteRecursively()
+            }
+            // Логи чистим всегда при смене версии
             val logDir = File(filesDir, "log")
             logDir.deleteRecursively()
         }
