@@ -657,10 +657,13 @@ class MaxProtocol(private val client: MaxTcpClient) {
     // ─── API методы ──────────────────────────────────────────────────────
 
     suspend fun fetchChats(): List<Map<String, Any?>> {
-        val payload = msgpackMap("limit" to 100)
+        if (!client.isConnected) { AppStateHelper.addLogEntry("fetchChats: нет соединения"); return emptyList() }
+        val marker = System.currentTimeMillis()
+        val payload = msgpackMap("marker" to marker)
         val resp = client.request(OP_CHATS_LIST, payload) ?: return emptyList()
         if (resp.cmd == MaxTcpClient.CMD_ERROR) {
-            AppStateHelper.addLogEntry("fetchChats ERROR: ${String(resp.payload, Charsets.UTF_8)}")
+            val errStr = String(resp.payload, Charsets.UTF_8).take(200)
+            AppStateHelper.addLogEntry("fetchChats ERROR: $errStr")
             return emptyList()
         }
         val data = unpackMap(resp.payload, resp.flags)
@@ -668,11 +671,25 @@ class MaxProtocol(private val client: MaxTcpClient) {
         return chats?.filterIsInstance<Map<String, Any?>>() ?: emptyList()
     }
 
-    suspend fun fetchHistory(chatId: Long, count: Int = 50): List<Map<String, Any?>> {
-        val payload = msgpackMap("chat_id" to chatId, "limit" to count)
+    suspend fun fetchHistory(chatId: Long, count: Int = 40): List<Map<String, Any?>> {
+        if (!client.isConnected) { AppStateHelper.addLogEntry("fetchHistory: нет соединения"); return emptyList() }
+        val now = System.currentTimeMillis()
+        val payload = msgpackMap(
+            "chatId" to chatId,
+            "forward" to 0,
+            "backward" to count,
+            "backwardTime" to 0,
+            "forwardTime" to 0,
+            "getChat" to false,
+            "from" to now,
+            "itemType" to "REGULAR",
+            "getMessages" to true,
+            "interactive" to false
+        )
         val resp = client.request(OP_CHAT_HISTORY, payload) ?: return emptyList()
         if (resp.cmd == MaxTcpClient.CMD_ERROR) {
-            AppStateHelper.addLogEntry("fetchHistory ERROR: ${String(resp.payload, Charsets.UTF_8)}")
+            val errStr = String(resp.payload, Charsets.UTF_8).take(200)
+            AppStateHelper.addLogEntry("fetchHistory ERROR: $errStr")
             return emptyList()
         }
         val data = unpackMap(resp.payload, resp.flags)
@@ -681,14 +698,22 @@ class MaxProtocol(private val client: MaxTcpClient) {
     }
 
     suspend fun sendMessage(chatId: Long, text: String): String? {
+        if (!client.isConnected) { AppStateHelper.addLogEntry("sendMessage: нет соединения"); return null }
+        val cid = System.currentTimeMillis()
         val payload = msgpackMap(
-            "chat_id" to chatId,
-            "text" to text,
-            "type" to "text"
+            "chatId" to chatId,
+            "message" to mapOf(
+                "text" to text,
+                "cid" to cid,
+                "elements" to emptyList<Any>(),
+                "attaches" to emptyList<Any>()
+            ),
+            "notify" to true
         )
         val resp = client.request(OP_MSG_SEND, payload) ?: return null
         if (resp.cmd == MaxTcpClient.CMD_ERROR) {
-            AppStateHelper.addLogEntry("sendMessage ERROR: ${String(resp.payload, Charsets.UTF_8)}")
+            val errStr = String(resp.payload, Charsets.UTF_8).take(200)
+            AppStateHelper.addLogEntry("sendMessage ERROR: $errStr")
             return null
         }
         val data = unpackMap(resp.payload, resp.flags)
