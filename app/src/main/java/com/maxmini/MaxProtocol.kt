@@ -14,7 +14,16 @@ import java.util.TimeZone
  *
  * Opcode из PyMax:
  *   PING = 1, SESSION_INIT = 6, AUTH_REQUEST = 17, AUTH = 18, LOGIN = 19
- *   CONTACT_SEARCH = 37, CHAT_HISTORY = 49, CHATS_LIST = 53, MSG_SEND = 64
+ *   AUTH_CONFIRM = 23, ASSETS_GET = 26, ASSETS_UPDATE = 27
+ *   ASSETS_GET_BY_IDS = 28, ASSETS_ADD = 29
+ *   CONTACT_SEARCH = 37, CHAT_HISTORY = 49, CHATS_LIST = 53
+ *   MSG_SEND = 64, FILE_DOWNLOAD = 88
+ *   AUTH_2FA_DETAILS = 104, AUTH_CREATE_TRACK = 112
+ *   AUTH_CHECK_PASSWORD = 113, AUTH_LOGIN_CHECK_PASSWORD = 115
+ *   NOTIF_MESSAGE = 128, NOTIF_TYPING = 129, NOTIF_PRESENCE = 132
+ *   NOTIF_CHAT = 135
+ *   DRAFT_SAVE = 176, DRAFT_DISCARD = 177
+ *   MSG_REACTION = 178, MSG_CANCEL_REACTION = 179
  */
 class MaxProtocol(private val client: MaxTcpClient) {
     companion object {
@@ -24,14 +33,31 @@ class MaxProtocol(private val client: MaxTcpClient) {
         const val OP_AUTH_REQUEST = 17
         const val OP_AUTH = 18
         const val OP_LOGIN = 19
+        const val OP_AUTH_CONFIRM = 23
+        const val OP_ASSETS_GET = 26
+        const val OP_ASSETS_UPDATE = 27
+        const val OP_ASSETS_GET_BY_IDS = 28
+        const val OP_ASSETS_ADD = 29
         const val OP_CONTACT_SEARCH = 37
         const val OP_CHAT_HISTORY = 49
         const val OP_CHATS_LIST = 53
         const val OP_MSG_SEND = 64
         const val OP_FILE_DOWNLOAD = 88
+        const val OP_AUTH_2FA_DETAILS = 104
+        const val OP_AUTH_CREATE_TRACK = 112
+        const val OP_AUTH_CHECK_PASSWORD = 113
+        const val OP_AUTH_LOGIN_CHECK_PASSWORD = 115
+        const val OP_NOTIF_MESSAGE = 128
+        const val OP_NOTIF_TYPING = 129
+        const val OP_NOTIF_PRESENCE = 132
+        const val OP_NOTIF_CHAT = 135
+        const val OP_DRAFT_SAVE = 176
+        const val OP_DRAFT_DISCARD = 177
+        const val OP_MSG_REACTION = 178
+        const val OP_MSG_CANCEL_REACTION = 179
 
-        const val AUTH_TYPE_START = 0
-        const val AUTH_TYPE_CHECK_CODE = 1
+        const val AUTH_TYPE_START = "START_AUTH"        // String, как в PyMax
+        const val AUTH_TYPE_CHECK_CODE = "CHECK_CODE"   // String, как в PyMax
     }
 
     // ─── Состояние (только AppState — единый источник истины) ─────────────
@@ -155,6 +181,10 @@ class MaxProtocol(private val client: MaxTcpClient) {
             is Boolean -> packer.packBoolean(v)
             is Double -> packer.packDouble(v)
             is Float -> packer.packFloat(v)
+            is ByteArray -> {
+                packer.packBinaryHeader(v.size)
+                packer.writePayload(v)
+            }
             is Map<*, *> -> {
                 packer.packMapHeader(v.size)
                 for ((mk, mv) in v) {
@@ -241,23 +271,32 @@ class MaxProtocol(private val client: MaxTcpClient) {
                 val len = unpacker.unpackBinaryHeader()
                 val bytes = ByteArray(len)
                 unpacker.readPayload(bytes)
-                bytes.decodeToString()
+                bytes
             }
             org.msgpack.value.ValueType.ARRAY -> {
                 val size = unpacker.unpackArrayHeader()
                 (0 until size).map { unpackAny(unpacker) }
             }
             org.msgpack.value.ValueType.MAP -> unpackValue(unpacker)
+            org.msgpack.value.ValueType.EXTENSION -> {
+                val extHeader = unpacker.unpackExtensionTypeHeader()
+                val extBytes = ByteArray(extHeader.length)
+                unpacker.readPayload(extBytes)
+                extBytes
+            }
             else -> { unpacker.skipValue(); null }
         }
     }
 
     private fun userAgentMap(): Map<String, Any?> = mapOf(
-        "deviceType" to "android",
-        "appVersion" to "2.1.1",
-        "osVersion" to android.os.Build.VERSION.RELEASE,
+        "deviceType" to "ANDROID",
+        "appVersion" to "26.14.1",
+        "buildNumber" to 6686,
+        "osVersion" to "Android ${android.os.Build.VERSION.RELEASE}",
         "timezone" to TimeZone.getDefault().id,
-        "screen" to "1080x1920",
+        "screen" to "405dpi 405dpi 1080x2400",
+        "pushDeviceType" to "GCM",
+        "arch" to "arm64-v8a",
         "locale" to "ru",
         "deviceLocale" to "ru",
         "deviceName" to android.os.Build.MODEL
@@ -294,10 +333,11 @@ class MaxProtocol(private val client: MaxTcpClient) {
      */
     private suspend fun doHandshake(): Boolean {
         AppStateHelper.addLogEntry("Handshake...")
+        val mtInstanceId = java.util.UUID.randomUUID().toString()
         val payload = msgpackMap(
-            "mt_instanceid" to "",
+            "mt_instanceid" to mtInstanceId,
             "userAgent" to userAgentMap(),
-            "clientSessionId" to 42,
+            "clientSessionId" to (1..70).random(),
             "deviceId" to AppStateHelper.deviceId
         )
         val resp = client.request(OP_SESSION_INIT, payload)
@@ -344,7 +384,9 @@ class MaxProtocol(private val client: MaxTcpClient) {
             "contactsSync" to -1,
             "draftsSync" to -1,
             "interactive" to true,
-            "presenceSync" to -1
+            "presenceSync" to -1,
+            "exp" to mapOf("chatsCountGroups" to byteArrayOf(0x0a, 0x32)),
+            "configHash" to "00000000-0000000000000000-00000000-0000000000000000-0000000000000000-0-0000000000000000-00000000"
         )
         val loginResp = client.request(OP_LOGIN, loginPayload)
         if (!checkError(loginResp, "LOGIN")) return false
@@ -429,7 +471,7 @@ class MaxProtocol(private val client: MaxTcpClient) {
             AppStateHelper.addLogEntry("Проверка SMS-кода...")
             val authPayload = msgpackMap(
                 "token" to authToken,
-                "verify_code" to code,
+                "verifyCode" to code,
                 "authTokenType" to AUTH_TYPE_CHECK_CODE
             )
             val authResp = client.request(OP_AUTH, authPayload)
@@ -514,8 +556,7 @@ class MaxProtocol(private val client: MaxTcpClient) {
                     // Сервер иногда шлёт ping как event — отвечаем
                     client.respond(frame.seq, OP_PING, byteArrayOf())
                 }
-                // Новое сообщение
-                128 -> { // NOTIF_MESSAGE
+                OP_NOTIF_MESSAGE -> { // Новое сообщение
                     val msg = data["message"] as? Map<String, Any?>
                     if (msg != null) {
                         onMessage?.invoke(msg)
@@ -529,6 +570,16 @@ class MaxProtocol(private val client: MaxTcpClient) {
                             AppState.newMessages.add(msg)
                         }
                     }
+                }
+                OP_NOTIF_TYPING -> {
+                    Log.d(TAG, "TYPING chatId=${data["chatId"]} userId=${data["userId"]}")
+                }
+                OP_NOTIF_PRESENCE -> {
+                    Log.d(TAG, "PRESENCE userId=${data["userId"]} status=${data["status"]}")
+                }
+                OP_NOTIF_CHAT -> {
+                    Log.d(TAG, "CHAT UPDATE chatId=${data["chatId"]}")
+                    onChatsLoaded?.invoke(AppState.chatsCache.toList())
                 }
                 else -> {
                     Log.d(TAG, "UNHANDLED EVENT opcode=${frame.opcode}")
